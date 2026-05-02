@@ -5,17 +5,26 @@ import requests
 import time
 
 # --- AYARLAR ---
+# Her sembol için takip edilecek özel zaman dilimleri
 SYMBOL_CONFIG = {
-    "BTC/USDT": {"proximity": 100},
-    "ETH/USDT": {"proximity": 5}
+    "BTC/USDT": {
+        "proximity": 100,
+        "timeframes": ['1h', '2h', '4h', '1d', '1w']
+    },
+    "ETH/USDT": {
+        "proximity": 5,
+        "timeframes": ['2h', '4h', '1d', '1w']
+    }
 }
-TIMEFRAME = '1h'
+
 TELEGRAM_TOKEN = "8205711200:AAE-76Kui2KTpPBYDeH_ktSzhSRkRTbf9Qo"
 CHAT_ID = "5719402713"
 
-# Durum takibi için hafıza (Aynı mesajı tekrar atmamak için)
-# Durumlar: 'normal', 'yaklasti_ust', 'yaklasti_alt', 'temas_ust', 'temas_alt'
-last_states = {symbol: 'normal' for symbol in SYMBOL_CONFIG.keys()}
+# Hafıza sistemi: Her sembol ve her zaman dilimi için ayrı durum takibi
+last_states = {
+    symbol: {tf: 'normal' for tf in config['timeframes']} 
+    for symbol, config in SYMBOL_CONFIG.items()
+}
 
 def send_telegram_msg(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -25,12 +34,14 @@ def send_telegram_msg(message):
     except Exception as e:
         print(f"Telegram Hatası: {e}")
 
-def fetch_data(symbol):
+def fetch_data(symbol, timeframe):
     exchange = ccxt.binance()
-    bars = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=100)
+    # Haftalık (1w) veri için daha fazla mum çekiyoruz
+    limit = 200 if timeframe in ['1d', '1w'] else 100
+    bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     
-    # İndikatörler
+    # Teknik Göstergeler (Bollinger Bantları ve RSI)
     bb = ta.bbands(df['close'], length=20, std=2)
     df['bb_upper'] = bb['BBU_20_2.0']
     df['bb_lower'] = bb['BBL_20_2.0']
@@ -38,45 +49,55 @@ def fetch_data(symbol):
     
     return df.iloc[-1]
 
-print("🚀 Bot Bulutta Başlatıldı... Sinyaller İzleniyor.")
-send_telegram_msg("🔔 *Bot Aktif!* \nBTC ve ETH için Yakınsama & Temas takibi başladı.")
+print("🚀 Kişiselleştirilmiş Periyot Botu Başlatıldı...")
+send_telegram_msg("🎯 *Kişiselleştirilmiş Takip Başladı!*\n\n*BTC:* 1sa, 2sa, 4sa, Günlük, Haftalık\n*ETH:* 2sa, 4sa, Günlük, Haftalık")
 
 while True:
     for symbol, config in SYMBOL_CONFIG.items():
-        try:
-            row = fetch_data(symbol)
-            price = row['close']
-            upper = row['bb_upper']
-            lower = row['bb_lower']
-            rsi = row['rsi']
-            prox = config['proximity']
-            
-            current_state = 'normal'
-            msg = ""
-
-            # 🔴 SATIŞ BÖLGESİ KONTROLÜ
-            if price >= upper:
-                current_state = 'temas_ust'
-                msg = f"🔴 *ACİL SAT SİNYALİ (Üst Bant)*\n\n💰 Fiyat: {price}\n📊 RSI: {rsi:.2f}\n⚠️ Bant Teması Gerçekleşti!"
-            elif (upper - price) <= prox:
-                current_state = 'yaklasti_ust'
-                msg = f"⚠️ *DİKKAT: Üst Banda Yaklaştı*\n\n💰 Fiyat: {price}\n📏 Mesafe: {upper - price:.2f}\n👀 Hazırlıklı Ol!"
-
-            # 🟢 ALIŞ BÖLGESİ KONTROLÜ
-            elif price <= lower:
-                current_state = 'temas_alt'
-                msg = f"🟢 *ACİL AL SİNYALİ (Alt Bant)*\n\n💰 Fiyat: {price}\n📊 RSI: {rsi:.2f}\n⚠️ Bant Teması Gerçekleşti!"
-            elif (price - lower) <= prox:
-                current_state = 'yaklasti_alt'
-                msg = f"⚠️ *DİKKAT: Alt Banda Yaklaştı*\n\n💰 Fiyat: {price}\n📏 Mesafe: {price - lower:.2f}\n👀 Hazırlıklı Ol!"
-
-            # Sadece durum değiştiğinde mesaj gönder
-            if current_state != last_states[symbol]:
-                if current_state != 'normal':
-                    send_telegram_msg(f"*{symbol}*\n{msg}")
-                last_states[symbol] = current_state
+        for tf in config['timeframes']:
+            try:
+                row = fetch_data(symbol, tf)
+                price = row['close']
+                upper = row['bb_upper']
+                lower = row['bb_lower']
+                rsi = row['rsi']
+                prox = config['proximity']
                 
-        except Exception as e:
-            print(f"Hata ({symbol}): {e}")
+                current_state = 'normal'
+                emoji = ""
+                title = ""
 
-    time.sleep(60) # Her dakika kontrol et
+                # KONTROL MANTIĞI
+                if price >= upper:
+                    current_state = 'temas_ust'
+                    emoji, title = "🔴", "ACİL SAT SİNYALİ"
+                elif (upper - price) <= prox:
+                    current_state = 'yaklasti_ust'
+                    emoji, title = "⚠️", "Üst Banda Yaklaştı"
+                elif price <= lower:
+                    current_state = 'temas_alt'
+                    emoji, title = "🟢", "ACİL AL SİNYALİ"
+                elif (price - lower) <= prox:
+                    current_state = 'yaklasti_alt'
+                    emoji, title = "⚠️", "Alt Banda Yaklaştı"
+
+                # Durum Değişimi Kontrolü
+                if current_state != last_states[symbol][tf]:
+                    if current_state != 'normal':
+                        # Haftalık ve Günlük periyotlar için ekstra vurgu yapalım
+                        tf_display = tf.replace('1d', 'GÜNLÜK').replace('1w', 'HAFTALIK')
+                        msg = (f"{emoji} *{symbol} - {tf_display}*\n"
+                               f"----------------------------\n"
+                               f"📢 *{title}*\n"
+                               f"💰 Fiyat: {price}\n"
+                               f"📊 RSI: {rsi:.2f}")
+                        send_telegram_msg(msg)
+                    
+                    last_states[symbol][tf] = current_state
+                
+            except Exception as e:
+                print(f"Hata ({symbol} - {tf}): {e}")
+            
+            time.sleep(1.5) # Binance API'yi yormayalım
+
+    time.sleep(60) # Her dakika listeyi baştan tara
