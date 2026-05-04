@@ -10,7 +10,7 @@ SYMBOL_CONFIG = {
     "ETH/USDT": {"proximity": 5, "timeframes": ['2h', '4h', '1d', '1w']}
 }
 
-TELEGRAM_TOKEN = "8205711200:AAE-76Kui2KTpPBYDeH_ktSzhSRkRTbf9Qo"
+TELEGRAM_TOKEN = "8205711200:AAG2ZBQy-OyYJNplgC3zxvAwhViaosEx6rY"
 CHAT_ID = "5719402713"
 
 # Hafıza sistemi (Yaklaşma ve Temas durumlarını ayrı ayrı tutar)
